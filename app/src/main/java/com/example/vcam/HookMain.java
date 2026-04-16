@@ -10,6 +10,10 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.SurfaceTexture;
+import android.graphics.Canvas;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Paint;
 import android.hardware.Camera;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
@@ -86,6 +90,9 @@ public class HookMain implements IXposedHookLoadPackage {
     public static SessionConfiguration fake_sessionConfiguration;
     public static SessionConfiguration sessionConfiguration;
     public static OutputConfiguration outputConfiguration;
+    public static int c2_ae_mode = -1;
+    public static int c2_ae_compensation = 0;
+    public static boolean c2_ae_lock = false;
     public boolean need_to_show_toast = true;
 
     public int c2_ori_width = 1280;
@@ -555,6 +562,65 @@ public class HookMain implements IXposedHookLoadPackage {
                 XposedBridge.log("【VCAM】Add target: " + param.args[0].toString());
                 param.args[0] = c2_virtual_surface;
 
+            }
+        });
+
+        XposedHelpers.findAndHookMethod("android.hardware.camera2.CaptureRequest.Builder", lpparam.classLoader, "set", CaptureRequest.Key.class, Object.class, new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) {
+                if (param.args[0] == null) return;
+                try {
+                    String keyStr = param.args[0].toString();
+                    Object val = param.args[1];
+                    String valStr = (val == null) ? "null" : val.toString();
+                    XposedBridge.log("【VCAM】CaptureRequest.set -> " + keyStr + " = " + valStr);
+
+                    // AE mode
+                    if (keyStr.contains("CONTROL_AE_MODE") || keyStr.contains("android.control.aeMode") || keyStr.contains("aeMode")) {
+                        if (val instanceof Integer) {
+                            c2_ae_mode = (Integer) val;
+                        }
+                        XposedBridge.log("【VCAM】Detected AE mode set: " + c2_ae_mode);
+                    }
+
+                    // AE exposure compensation
+                    if (keyStr.contains("CONTROL_AE_EXPOSURE_COMPENSATION") || keyStr.contains("aeExposureCompensation") || keyStr.contains("exposureCompensation")) {
+                        if (val instanceof Integer) {
+                            int newComp = (Integer) val;
+                            if (c2_ae_lock) {
+                                XposedBridge.log("【VCAM】AE compensation change ignored due to AE lock: " + newComp);
+                            } else {
+                                c2_ae_compensation = newComp;
+                                XposedBridge.log("【VCAM】Detected AE compensation set: " + c2_ae_compensation);
+                            }
+                        }
+                    }
+
+                    // AE lock
+                    if (keyStr.contains("CONTROL_AE_LOCK") || keyStr.contains("android.control.aeLock") || keyStr.contains("aeLock")) {
+                        if (val instanceof Boolean) {
+                            c2_ae_lock = (Boolean) val;
+                        }
+                        XposedBridge.log("【VCAM】Detected AE lock set: " + c2_ae_lock);
+                    }
+                } catch (Throwable t) {
+                    XposedBridge.log("【VCAM】AE-detect error:" + t.toString());
+                }
+            }
+        });
+
+        XposedHelpers.findAndHookMethod("android.hardware.camera2.CaptureRequest.Builder", lpparam.classLoader, "get", CaptureRequest.Key.class, new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                try {
+                    Object key = param.args[0];
+                    Object result = param.getResult();
+                    String keyStr = (key == null) ? "null" : key.toString();
+                    String resStr = (result == null) ? "null" : result.toString();
+                    XposedBridge.log("【VCAM】CaptureRequest.get -> " + keyStr + " = " + resStr);
+                } catch (Throwable t) {
+                    XposedBridge.log("【VCAM】CaptureRequest.get log error:" + t.toString());
+                }
             }
         });
 
@@ -1042,6 +1108,13 @@ public class HookMain implements IXposedHookLoadPackage {
                     }
 
                     Bitmap pict = getBMP(video_path + "1000.bmp");
+                    if (pict != null && c2_ae_compensation != 0 && !c2_ae_lock) {
+                        try {
+                            pict = adjustBitmapBrightness(pict, c2_ae_compensation);
+                        } catch (Throwable ee) {
+                            XposedBridge.log("【VCAM】adjust jpeg brightness error:" + ee.toString());
+                        }
+                    }
                     ByteArrayOutputStream temp_array = new ByteArrayOutputStream();
                     pict.compress(Bitmap.CompressFormat.JPEG, 100, temp_array);
                     byte[] jpeg_data = temp_array.toByteArray();
@@ -1081,7 +1154,15 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (control_file.exists()) {
                         return;
                     }
-                    input = getYUVByBitmap(getBMP(video_path + "1000.bmp"));
+                    try {
+                        Bitmap bmp = getBMP(video_path + "1000.bmp");
+                        input = getYUVByBitmap(bmp);
+                        if (input != null && bmp != null && c2_ae_compensation != 0 && !c2_ae_lock) {
+                            applyAEToNV21(input, bmp.getWidth(), bmp.getHeight(), c2_ae_compensation);
+                        }
+                    } catch (Throwable ee) {
+                        XposedBridge.log("【VCAM】prepare yuv error:" + ee.toString());
+                    }
                     paramd.args[0] = input;
                 } catch (Exception ee) {
                     XposedBridge.log("【VCAM】" + ee.toString());
@@ -1119,6 +1200,13 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (localcam.equals(camera_onPreviewFrame)) {
                     while (data_buffer == null) {
                     }
+                        if (c2_ae_compensation != 0 && mwidth > 0 && mhight > 0 && !c2_ae_lock) {
+                            try {
+                                applyAEToNV21(data_buffer, mwidth, mhight, c2_ae_compensation);
+                            } catch (Throwable t) {
+                                XposedBridge.log("【VCAM】apply ae preview error:" + t.toString());
+                            }
+                        }
                     System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
                 } else {
                     camera_callback_calss = preview_cb_class;
@@ -1146,6 +1234,13 @@ public class HookMain implements IXposedHookLoadPackage {
                     hw_decode_obj.setSaveFrames("", OutputImageFormat.NV21);
                     hw_decode_obj.decode(video_path + "virtual.mp4");
                     while (data_buffer == null) {
+                    }
+                    if (c2_ae_compensation != 0 && mwidth > 0 && mhight > 0 && !c2_ae_lock) {
+                        try {
+                            applyAEToNV21(data_buffer, mwidth, mhight, c2_ae_compensation);
+                        } catch (Throwable t) {
+                            XposedBridge.log("【VCAM】apply ae preview error:" + t.toString());
+                        }
                     }
                     System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
                 }
@@ -1226,6 +1321,41 @@ public class HookMain implements IXposedHookLoadPackage {
         int[] pixels = new int[size];
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
         return rgb2YCbCr420(pixels, width, height);
+    }
+
+    private static void applyAEToNV21(byte[] data, int width, int height, int compensation) {
+        if (data == null) return;
+        int yLen = width * height;
+        int adj = compensation * 10; // step per compensation unit
+        for (int i = 0; i < Math.min(yLen, data.length); i++) {
+            int v = data[i] & 0xFF;
+            v += adj;
+            if (v < 0) v = 0;
+            if (v > 255) v = 255;
+            data[i] = (byte) v;
+        }
+    }
+
+    private static Bitmap adjustBitmapBrightness(Bitmap src, int compensation) {
+        if (src == null) return null;
+        try {
+            Bitmap bmp = Bitmap.createBitmap(src.getWidth(), src.getHeight(), src.getConfig() != null ? src.getConfig() : Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bmp);
+            float translate = compensation * 10f;
+            ColorMatrix cm = new ColorMatrix(new float[]{
+                    1, 0, 0, 0, translate,
+                    0, 1, 0, 0, translate,
+                    0, 0, 1, 0, translate,
+                    0, 0, 0, 1, 0
+            });
+            Paint paint = new Paint();
+            paint.setColorFilter(new ColorMatrixColorFilter(cm));
+            canvas.drawBitmap(src, 0, 0, paint);
+            return bmp;
+        } catch (Throwable t) {
+            XposedBridge.log("【VCAM】adjustBitmapBrightness error:" + t.toString());
+            return src;
+        }
     }
 }
 
