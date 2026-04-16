@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (grantResults.length > 0) {
             if (grantResults[0] == PackageManager.PERMISSION_DENIED) {
+                Log.d(this.getApplicationContext().getPackageName(), "【VCAM】[toast] Permission denied");
                 Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show();
             }else {
                 File camera_dir = new File (Environment.getExternalStorageDirectory().getAbsolutePath()+"/DCIM/Camera1/");
@@ -204,7 +205,10 @@ public class MainActivity extends Activity {
                 builder.setTitle(R.string.permission_lack_warn);
                 builder.setMessage(R.string.permission_description);
 
-                builder.setNegativeButton(R.string.negative, (dialogInterface, i) -> Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show());
+                builder.setNegativeButton(R.string.negative, (dialogInterface, i) -> {
+                    Log.d(this.getApplicationContext().getPackageName(), "【VCAM】[toast] Permission denied");
+                    Toast.makeText(MainActivity.this, R.string.permission_lack_warn, Toast.LENGTH_SHORT).show();
+                });
 
                 builder.setPositiveButton(R.string.positive, (dialogInterface, i) -> requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1));
                 builder.show();

@@ -143,7 +143,9 @@ public class HookMain implements IXposedHookLoadPackage {
                     need_to_show_toast = !toast_control.exists();
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "No replacement video\n" + lpparam.packageName + " current path: " + video_path, Toast.LENGTH_SHORT).show();
+                            String toastMessage = "No replacement video\n" + lpparam.packageName + " current path: " + video_path;
+                            XposedBridge.log("【VCAM】[toast] " + toastMessage);
+                            Toast.makeText(toast_content, toastMessage, Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
                             XposedBridge.log("【VCAM】[toast]" + ee.toString());
                         }
@@ -173,7 +175,9 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (!file.exists()) {
                     if (toast_content != null && need_to_show_toast) {
                         try {
-                            Toast.makeText(toast_content, "No replacement video\n" + lpparam.packageName + " current path: " + video_path, Toast.LENGTH_SHORT).show();
+                            String toastMessage = "No replacement video\n" + lpparam.packageName + " current path: " + video_path;
+                            XposedBridge.log("【VCAM】[toast] " + toastMessage);
+                            Toast.makeText(toast_content, toastMessage, Toast.LENGTH_SHORT).show();
                         } catch (Exception ee) {
                             XposedBridge.log("【VCAM】[toast]" + ee.toString());
                         }
